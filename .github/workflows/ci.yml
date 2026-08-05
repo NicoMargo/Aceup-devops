@@ -15,9 +15,9 @@ jobs:
           fetch-depth: 0
           
       - name: Setup Node
-          uses: actions/setup-node@v4
-          with:
-            node-version-file: starter/.nvmrc
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: starter/.nvmrc
 
       - name: Determine affected packages
         id: affected
@@ -48,5 +48,5 @@ jobs:
           echo "services=$SERVICES" >> "$GITHUB_OUTPUT"
         
       - name: Install dependencies
-          working-directory: starter
-          run: npm ci
+        working-directory: starter
+        run: npm ci
