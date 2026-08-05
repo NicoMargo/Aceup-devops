@@ -7,7 +7,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
-    "test": "node --import tsx --test src/**/*.test.ts"
+    "test": "node --import tsx --test $(find src -name '*.test.ts')"
   },
   "dependencies": {
     "@aceup/http-client": "0.1.0",
