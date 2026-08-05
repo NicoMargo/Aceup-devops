@@ -29,7 +29,7 @@ jobs:
             BASE_SHA="${{ github.event.before }}"
           fi
           HEAD_SHA="${{ github.sha }}"
-
+          
           echo "Base: $BASE_SHA"
           echo "Head: $HEAD_SHA"
 
@@ -46,7 +46,17 @@ jobs:
 
           echo "packages=$PACKAGES" >> "$GITHUB_OUTPUT"
           echo "services=$SERVICES" >> "$GITHUB_OUTPUT"
-        
+
       - name: Install dependencies
         working-directory: starter
         run: npm ci
+
+      - name: Run tests for affected packages
+        working-directory: starter
+        run: |
+          echo "Testing: ${{ steps.affected.outputs.packages }}"
+          FLAGS=""
+          for pkg in ${{ steps.affected.outputs.packages }}; do
+            FLAGS="$FLAGS -w $pkg"
+          done
+          npm test $FLAGS
