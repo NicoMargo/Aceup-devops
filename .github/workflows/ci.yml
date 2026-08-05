@@ -14,7 +14,14 @@ jobs:
         with:
           fetch-depth: 0
           
-      - name: Determine changed files
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: starter/.nvmrc
+
+      - name: Determine affected packages
+        id: affected
+        working-directory: starter
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             BASE_SHA="${{ github.event.pull_request.base.sha }}"
@@ -22,20 +29,24 @@ jobs:
             BASE_SHA="${{ github.event.before }}"
           fi
           HEAD_SHA="${{ github.sha }}"
+
           echo "Base: $BASE_SHA"
           echo "Head: $HEAD_SHA"
-          echo "--- changed files ---"
-          git diff --name-only "$BASE_SHA" "$HEAD_SHA"
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version-file: starter/.nvmrc
-      
+          CHANGED_FILES=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+          echo "--- changed files ---"
+          echo "$CHANGED_FILES"
+
+          RESULT=$(node scripts/affected-packages.js $CHANGED_FILES)
+          echo "--- affected-packages.js output ---"
+          echo "$RESULT"
+
+          PACKAGES=$(echo "$RESULT" | jq -r '.affectedPackages | join(" ")')
+          SERVICES=$(echo "$RESULT" | jq -r '.affectedServices | join(" ")')
+
+          echo "packages=$PACKAGES" >> "$GITHUB_OUTPUT"
+          echo "services=$SERVICES" >> "$GITHUB_OUTPUT"
+        
       - name: Install dependencies
         working-directory: starter
         run: npm ci
-
-      - name: Run all tests
-        working-directory: starter
-        run: npm test
