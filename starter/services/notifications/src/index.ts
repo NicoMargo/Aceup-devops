@@ -54,7 +54,7 @@ async function main(): Promise<void> {
   });
 
   app.listen(port, () => {
-    log.info("notifications listening", { port, secretId });
+    log.info("notifications service listening", { port, secretId });
   });
 }
 
