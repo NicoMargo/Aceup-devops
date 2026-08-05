@@ -85,9 +85,10 @@ jobs:
       - name: Build and push affected service images
         working-directory: starter
         run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           for dir in ${{ needs.test.outputs.services }}; do
             service=$(basename "$dir")
-            tag="ghcr.io/${{ github.repository_owner }}/$service:${{ github.sha }}"
+            tag="ghcr.io/$OWNER/$service:${{ github.sha }}"
             echo "Building $service from $dir -> $tag"
             docker build -f "$dir/Dockerfile" -t "$tag" .
             docker push "$tag"
