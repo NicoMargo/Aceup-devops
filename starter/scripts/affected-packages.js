@@ -51,9 +51,10 @@ const directlyChanged = new Set();
 let rootChange = false;
 
 for (const file of changedFilesFromRepoRoot) {
-    if (!file.startsWith("starter/")) { 
-    continue; // out of scope for this script (e.g. root-level repo files)
-    }
+      if (!file.startsWith("starter/")) {
+        rootChange = true; // change outside the monorepo root (e.g. CI workflow) — safer to rebuild everything
+        continue;
+      }
     const relative = file.slice("starter/".length);
     const owner = ownerOf(relative, workspaces);
     if (owner) {
