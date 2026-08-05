@@ -96,7 +96,7 @@ const result = computeAffected(changedFiles, workspaces);
 const affectedServices = result.affected
     .map((name) => byName.get(name))
     .filter((w) => w?.isService)
-    .map((w) => w.name);
+    .map((w) => w.dir);
 
 console.log(JSON.stringify({
     rootChange: result.rootChange,

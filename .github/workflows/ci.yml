@@ -2,18 +2,24 @@ name: CI
 
 on:
   pull_request:
-  push:        
+  push:
     branches: [main]
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.affected.outputs.services }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -29,7 +35,7 @@ jobs:
             BASE_SHA="${{ github.event.before }}"
           fi
           HEAD_SHA="${{ github.sha }}"
-          
+
           echo "Base: $BASE_SHA"
           echo "Head: $HEAD_SHA"
 
@@ -60,3 +66,30 @@ jobs:
             FLAGS="$FLAGS -w $pkg"
           done
           npm test $FLAGS
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    if: needs.test.outputs.services != ''
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push affected service images
+        working-directory: starter
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          for dir in ${{ needs.test.outputs.services }}; do
+            service=$(basename "$dir")
+            tag="ghcr.io/$OWNER/$service:${{ github.sha }}"
+            echo "Building $service from $dir -> $tag"
+            docker build -f "$dir/Dockerfile" -t "$tag" .
+            docker push "$tag"
+          done
