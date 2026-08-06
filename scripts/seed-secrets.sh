@@ -20,7 +20,10 @@ seed() {
     -H 'content-type: application/json' \
     -d '{"replication":{"automatic":{}}}' || true
 
-  encoded=$(printf '%s' "$value" | base64 -w0)
+  # The REST API takes the payload as base64, since protobuf bytes fields become
+  # base64 in JSON. `tr -d` instead of `base64 -w0`: the -w flag is GNU only and
+  # macOS ships the BSD version.
+  encoded=$(printf '%s' "$value" | base64 | tr -d '\n')
 
   curl -sS -o /dev/null -X POST \
     "${ENDPOINT}/v1/projects/${PROJECT}/secrets/${id}:addVersion" \

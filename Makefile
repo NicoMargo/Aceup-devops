@@ -1,6 +1,6 @@
 NODE_IMAGE  ?= node:20-alpine
-# Pinned by digest, not :latest — the emulator is what the whole deploy path
-# depends on, so a silent change there would change the pipeline underneath us.
+
+# Pinned by digest, not :latest
 # This is floci-gcp 0.6.0.
 FLOCI_IMAGE ?= floci/floci-gcp@sha256:fe61b4824d52de128846384c33a94600c1c63aeafe92c3319ee723f59a16d4c1
 ENV         ?= staging
@@ -35,10 +35,14 @@ build:
 
 # The Docker socket is mounted because floci starts Cloud Run containers through
 # the host daemon. Safe to run twice.
+# Checks whether it is *running*, not whether it exists: after a reboot the
+# container is still there but stopped, and starting it again would be skipped.
 floci-up:
-	@docker inspect floci-gcp >/dev/null 2>&1 || \
+	@docker inspect -f '{{.State.Running}}' floci-gcp 2>/dev/null | grep -q true || { \
+		docker rm -f floci-gcp >/dev/null 2>&1 || true; \
 		docker run -d --name floci-gcp -p 4588:4588 \
-			-v /var/run/docker.sock:/var/run/docker.sock $(FLOCI_IMAGE)
+			-v /var/run/docker.sock:/var/run/docker.sock $(FLOCI_IMAGE); \
+	}
 	@for _ in $$(seq 1 30); do \
 		curl -sf http://localhost:4588/v1/projects/readiness-probe/secrets >/dev/null && \
 			echo "floci is ready" && exit 0; \

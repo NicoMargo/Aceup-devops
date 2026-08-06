@@ -22,8 +22,14 @@ PROJECT=$(sed -n 's/^[[:space:]]*project[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\
 
 # Terraform always runs containerised so its version is pinned, not inherited
 # from whatever the host happens to have installed.
+#
+# host.docker.internal instead of --network host: on Docker Desktop the
+# containers live in a Linux VM, so host networking does not reach the Mac's
+# localhost. This form works on both.
 tf() {
-  docker run --rm --network host --user "$(id -u):$(id -g)" \
+  docker run --rm --user "$(id -u):$(id -g)" \
+    --add-host host.docker.internal:host-gateway \
+    -e TF_VAR_floci_endpoint=http://host.docker.internal:4588 \
     -v "${REPO_ROOT}/infra:/workspace" \
     -w "/workspace/envs/${ENVIRONMENT}" \
     "$TF_IMAGE" "$@"
@@ -61,7 +67,10 @@ published_port() {
 # instead of resurfacing later as confusing integration-test failures.
 verify() {
   local port="$1" expected="$2" reported
-  reported=$(curl -sS -m 5 "http://localhost:${port}/health" | jq -r '.service // ""')
+  # Pulls the name out of {"status":"ok","service":"inventory"} with grep instead
+  # of jq, so the only tools this needs on the host are Docker and make.
+  reported=$(curl -sS -m 5 "http://localhost:${port}/health" \
+    | grep -o '"service":"[^"]*"' | cut -d'"' -f4)
   [ "$reported" = "$expected" ] || {
     echo "port ${port} reports '${reported}', expected '${expected}'" >&2
     return 1

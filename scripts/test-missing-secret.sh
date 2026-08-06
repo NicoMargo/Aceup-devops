@@ -25,8 +25,10 @@ IMAGE=$(sed -n 's/^[[:space:]]*inventory_image[[:space:]]*=[[:space:]]*"\([^"]*\
 
 echo "==> container-level: inventory must refuse to start without its secret"
 
+# --stop-timeout rather than the `timeout` command: macOS does not ship one.
+# The container exits on its own anyway; this is only a guard against a hang.
 set +e
-output=$(timeout 60 docker run --rm \
+output=$(docker run --rm --stop-timeout 60 \
   --add-host host.docker.internal:host-gateway \
   -e GCP_PROJECT_ID="$EMPTY_PROJECT" \
   -e SECRET_MANAGER_EMULATOR_HOST=host.docker.internal:4588 \
@@ -70,7 +72,9 @@ curl -sS -o /dev/null -X POST "${BASE}?serviceId=${SERVICE}" \
 state=""
 for _ in $(seq 1 60); do
   sleep 10
-  state=$(curl -sS "${BASE}/${SERVICE}" | jq -r '.terminalCondition.state // ""')
+  # terminalCondition comes first in the response, so the first CONDITION_* match
+  # is its state. grep keeps jq off the list of host requirements.
+  state=$(curl -sS "${BASE}/${SERVICE}" | grep -o 'CONDITION_[A-Z]*' | head -1)
   case "$state" in
     CONDITION_FAILED | CONDITION_SUCCEEDED) break ;;
   esac
