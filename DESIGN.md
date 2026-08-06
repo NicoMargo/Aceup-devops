@@ -219,8 +219,7 @@ Left out on purpose:
 1. The prod promotion job with a GitHub Environment and required reviewers.
 2. Reference images by digest, not tag. The build already prints the digest; I
    would capture it and write it into `terraform.tfvars`.
-3. A Makefile as the single entry point for developers and CI.
-4. Real GCP identity: WIF, per-service runtime accounts, per-secret IAM bindings.
+3. Real GCP identity: WIF, per-service runtime accounts, per-secret IAM bindings.
 5. Watch the `.trivyignore` expiry and drop the entry once a patched
    `node:20-alpine` is published.
 
@@ -234,5 +233,7 @@ Left out on purpose:
 - On floci the environment is recreated every CI run, so "we did not redeploy the
   unchanged services" is true in the manifest but invisible at runtime.
 - Integration tests assume a fresh environment with known stock values.
-- Host tools: Docker plus `curl`, `jq`, `sed` and `base64`. Node, Terraform and
-  floci all run in pinned containers, but those four utilities are assumed.
+- Host tools: Docker, `make`, and `curl`, `jq`, `sed`, `base64`. Node, Terraform
+  and floci all run in pinned containers, and `make` is only a thin wrapper over
+  the scripts, but those utilities are still assumed to exist. On a clean Ubuntu
+  I had to install `make` myself.
