@@ -1,0 +1,14 @@
+# Documented exceptions to the image scan policy.
+#
+# The policy is: fail the build on fixable HIGH and CRITICAL findings. Anything
+# listed here is a single, reviewed exception with a reason and an expiry date,
+# not a lowered threshold. When an entry expires the build fails again and
+# someone has to decide once more.
+
+# openssl heap use-after-free in PKCS7_verify(). Alpine ships the fix in
+# 3.5.7-r0, but node:20-alpine has not been rebuilt with it yet. Running
+# `apk upgrade` at build time would pick it up, but it would also make two
+# builds of the same commit produce different images, and we chose reproducible
+# builds. Revisit when a patched node:20-alpine is published.
+# Expires: 2026-09-30
+CVE-2026-45447

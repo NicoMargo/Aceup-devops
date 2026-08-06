@@ -30,7 +30,12 @@ COPY packages/http-client/package.json packages/http-client/
 COPY packages/types/package.json packages/types/
 COPY services/orders/package.json services/orders/
 
-RUN npm ci --omit=dev
+# npm and yarn are only needed to install dependencies. At runtime we just run
+# node, so they are removed: their own bundled dependencies were the source of
+# every HIGH/CRITICAL finding in the image scan. Same RUN as the install, or the
+# files would still exist in the previous layer.
+RUN npm ci --omit=dev \
+ && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx /opt/yarn*
 
 COPY --from=build /app/packages/logger/dist packages/logger/dist
 COPY --from=build /app/packages/secrets/dist packages/secrets/dist
