@@ -111,9 +111,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # floci runs Cloud Run containers through the host Docker daemon, so it
+      # needs the socket mounted — this is what `floci gcp start` does for you
+      # locally, and omitting it makes every deploy fail with a socket error.
       - name: Start floci-gcp
         run: |
-          docker run -d --name floci-gcp -p 4588:4588 floci/floci-gcp:latest
+          docker run -d --name floci-gcp \
+            -p 4588:4588 \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            floci/floci-gcp:latest
           for _ in $(seq 1 30); do
             if curl -sf "http://localhost:4588/v1/projects/readiness-probe/secrets" >/dev/null; then
               echo "floci is ready"
