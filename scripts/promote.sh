@@ -17,7 +17,10 @@ for service in inventory notifications orders; do
   image=$(sed -n "s/^[[:space:]]*${service}_image[[:space:]]*=[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$FROM")
   [ -n "$image" ] || { echo "could not read ${service}_image from staging" >&2; exit 1; }
 
-  sed -i "s|^\([[:space:]]*${service}_image[[:space:]]*=[[:space:]]*\).*|\1\"${image}\"|" "$TO"
+  # Write through a temp file instead of `sed -i`: GNU and BSD sed disagree on
+  # whether -i takes a backup suffix, and macOS ships the BSD one.
+  sed "s|^\([[:space:]]*${service}_image[[:space:]]*=[[:space:]]*\).*|\1\"${image}\"|" "$TO" > "${TO}.tmp"
+  mv "${TO}.tmp" "$TO"
   echo "  ${service} -> ${image}"
 done
 

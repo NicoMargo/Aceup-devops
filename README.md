@@ -71,13 +71,18 @@ copying the values across.
 
 ## Running it locally
 
-You need **Docker** and **make**. Node, Terraform and floci all run in containers
-with pinned versions — nothing else has to be installed. The scripts also use
-`curl`, `jq`, `sed` and `base64`, which come with most systems.
+This project was **developed** with **Ubuntu 24.04**
 
-The whole loop is one command:
+You need **Docker** and **make**, and your user has to be able to talk to the
+Docker daemon (be in the `docker` group, or run the commands with `sudo`).
 
-```bash
+Node, Terraform and floci all run in containers with pinned versions, so none of
+them has to be installed. The scripts use only `curl`, `sed`, `grep` and
+`base64` beyond that.
+
+The whole loop is one BASH command:
+
+```
 make verify ENV=staging
 ```
 
@@ -140,8 +145,7 @@ CI run — the only thing that comes out is the log. That is why the integration
 tests run inside the same VM.
 
 CI runs the same `make` targets you run locally — `make floci-up`,
-`make deploy ENV=staging`, `make integration-test ENV=staging`. There is no
-separate CI-only path that could drift from what you tested by hand.
+`make deploy ENV=staging`, `make integration-test ENV=staging`.
 
 ## Security checks in the pipeline
 
@@ -164,8 +168,7 @@ separate CI-only path that could drift from what you tested by hand.
 
 ```bash
 # what is deployed, and which revision is serving (swap the project for prod)
-curl -s "http://localhost:4588/v2/projects/floci-staging/locations/us-central1/services" \
-  | jq '.services[] | {name, uri, revision: .latestReadyRevision}'
+curl -s "http://localhost:4588/v2/projects/floci-staging/locations/us-central1/services"
 
 # roll back one service: put its previous image back in the tfvars and redeploy
 git revert <commit>            # or edit infra/envs/staging/terraform.tfvars
@@ -194,4 +197,4 @@ the old value until it is replaced. Traffic only moves to the new revision once
 it is healthy, so a wrong secret value means the deploy fails and the old
 revision keeps serving.
 
-Known limits are listed at the end of [DESIGN.md](DESIGN.md).
+Known limits are listed at the end of DESIGN.md.

@@ -2,12 +2,32 @@
 
 Decisions I made, why, and what I left out.
 
+## What happens when you push
+
+1. **You open or update a pull request.** CI starts.
+2. **`test`** diffs your branch against its base, feeds the changed files to
+   `affected-packages.js`, and runs the unit tests only for the packages that come
+   back. It also runs `npm audit`, which fails on high or critical.
+3. **`build`** runs only if something is affected. For each affected service it
+   builds the image, scans it with Trivy, and pushes it to GHCR **in that order**,
+   so an image that fails the scan never reaches the registry. Then it reads back
+   the digest of what it pushed.
+4. **`deploy-staging`** starts a fresh floci emulator inside the runner, seeds the
+   secrets from the environment's GitHub secrets, and applies Terraform in two
+   phases. Services this run rebuilt get the new digest; the rest get what
+   `infra/envs/staging/terraform.tfvars` pins. Then it runs the integration tests
+   against the deployed services and checks they fail closed without a secret.
+5. **If anything above fails, the pull request cannot be merged.**
+6. **You merge to `main`.** The same three jobs run again, and then `deploy-prod`
+   appears and waits, GitHub holds it until someone approves the `production`
+   environment. It deploys exactly what the prod tfvars pins.
+7. **Promoting is a separate change.** `scripts/promote.sh` copies the staging
+   digests into the prod tfvars, and that edit goes through its own pull request.
+
 ## Change detection
 
 I did not want a hardcoded map like "if `services/orders/**` changed, deploy
-orders". It works with three services and rots as soon as someone adds one.
-
-`starter/scripts/affected-packages.js` builds the graph from the repo instead: it
+orders". `starter/scripts/affected-packages.js` builds the graph from the repo instead: it
 reads every `package.json` under `packages/*` and `services/*`, builds a reverse
 dependency graph, maps each changed file to the workspace that owns it, and walks
 the graph to find everything that depends on the changed packages. CI runs
@@ -22,17 +42,13 @@ scripts), the script returns "everything affected". That is on purpose: if the
 logic that decides what to build has itself changed, I do not want to trust it to
 scope the build.
 
-I only found that fallback was missing after running the real pipeline — a PR
-touching only `ci.yml` produced an empty list. It still passed, but by accident
-(npm runs all workspaces when no `-w` is given), not by design.
-
 ## Environments and promotion
 
 Two environments, each in its own GCP project (`floci-staging`, `floci-prod`).
 Separate projects because on real GCP that is the strongest isolation boundary:
 IAM, quotas and billing are all per project. floci does not put the project in
-its container names, so I also add a `staging-` / `prod-` prefix — that part is
-only a workaround so port discovery can tell the environments apart.
+its container names, so I also add a `staging-` / `prod-` prefix, that part is
+only a workaround so port discovery can tell the environments.
 
 Terraform is a `cloud-run-service` module, a `platform` module that wires the
 three services together, and one thin root per environment. No resource is
@@ -59,32 +75,24 @@ someone approves it. I chose manual approval over promoting automatically after
 staging because the integration tests here are small, so I do not have enough
 confidence to skip a human. The cost is one click.
 
-On floci this proves the mechanism but not much else: the prod job deploys into
-an emulator that lives for the length of the job. A real prod is only meaningful
-when the target is actual GCP.
-
 ## Secrets
 
 **Access pattern.** Services fetch tokens from Secret Manager at startup with the
 SDK. I kept this instead of Cloud Run's native secret injection because the
 starter is already written around an SDK call, and changing it would mean changing
-the application, not only the deployment. On real GCP I would reconsider:
-injection keeps the app simpler and moves access control fully into IAM.
+the application, not only the deployment. 
 
 **Making it work with floci.** The shipped `createSecretsClient()` builds the
 client with no arguments, and that client reads no environment variable to decide
-where to connect — so it always tried to reach real Google Cloud. The
+where to connect, so it always tried to reach real Google Cloud. The
 `EMULATOR_HOST` convention that works for Firestore or Pub/Sub does not exist for
-this client, because it is gRPC based. (The starter README also mentions
-`SECRETMANAGER_EMULATOR_HOST` while floci exports `SECRET_MANAGER_EMULATOR_HOST`,
-but neither would have worked anyway.)
+this client. (The starter README also mentions
+`SECRETMANAGER_EMULATOR_HOST` while floci exports `SECRET_MANAGER_EMULATOR_HOST`)
 
 My fix builds the client conditionally: with `SECRET_MANAGER_EMULATOR_HOST` set it
-connects to that host and port over an insecure channel; without it, the default
-client and Application Default Credentials. The same compiled code runs against
-floci and real GCP. One detail cost me time: `apiEndpoint` and `port` must be two
-separate options, otherwise the client appends the default port and you get
-`localhost:4588:443`.
+connects to that host and port over an insecure channel (floci), without it, the default
+client and Application Default Credentials (GCP). The same compiled code runs against
+floci and real GCP. 
 
 **Seeding.** `scripts/seed-secrets.sh` uses the Secret Manager REST API with
 `curl`, so it needs no Node. Values come from environment variables, so CI injects
@@ -92,38 +100,35 @@ them from GitHub Secrets; defaults are throwaway dev tokens. It logs secret ids,
 never values, and ignores "already exists", so re-running is safe.
 
 **Failure mode.** All three services load secrets in `main()` before
-`app.listen()`. A missing secret is therefore not a 500 — the process exits and
+`app.listen()`. A missing secret is therefore not a 500, the process exits and
 never serves traffic. On Cloud Run that is a revision that never becomes ready. I
 saw it for real: floci waited four minutes and reported
 `Cloud Run runtime did not become ready before timeout`.
+
 `scripts/test-missing-secret.sh` asserts the container exits non-zero with the
 expected log line, and with `--full` also asserts the Cloud Run revision ends in
 `CONDITION_FAILED`. CI runs the fast check every time; four minutes per PR for the
 slow one is not worth it.
 
-**Rotation.** Services read `latest` and cache it for the process lifetime, so a
-new version does not affect running containers. Rotation is: add the version, then
-deploy a new revision. That is safe because traffic only moves once the new
-revision is healthy — a bad value means the revision fails to start and traffic
-stays where it is.
+**Rotation.** Services read the secret once at startup and keep the value in
+  memory, so adding a new version does not change anything for containers that are
+  already running. Rotating means: add the version, then deploy a new revision so
+  the containers start again and pick it up.
 
-**IAM on real GCP** (design only, floci has no auth): one runtime service account
-per service instead of the default compute account; `secretAccessor` granted per
-secret, so the inventory account can read `inventory-api-token` and nothing else;
-a separate deploy account per environment with `run.developer`,
-`artifactregistry.writer` and `iam.serviceAccountUser`; and no long-lived JSON
-keys — GitHub Actions gets short-lived credentials through Workload Identity
-Federation.
+**IAM on real GCP** (design only, floci has no auth). One service account per
+  service, not the shared default. Access is granted per secret, and it follows who
+  calls whom: `inventory` and `notifications` each read only their own token, which
+  they use to check incoming requests, while `orders` reads both, because it is the
+  caller and has to authenticate against them
 
 ## floci vs real GCP
 
 What I learned: floci emulates Cloud Run **v2** and Secret Manager over **REST**
 as well as gRPC, so the Terraform Google provider works against it with
 `cloud_run_v2_custom_endpoint` and `secret_manager_custom_endpoint`. Its state is
-in memory, so a restart deletes everything — fine for CI, where each run starts a
+in memory, so a restart deletes everything, where each run starts a
 fresh emulator. It launches Cloud Run containers through the host Docker daemon,
-so it needs `/var/run/docker.sock` mounted (`floci gcp start` does this; a plain
-`docker run` does not, and the deploy fails with a socket error).
+so it needs `/var/run/docker.sock` mounted.
 
 **The service discovery gap.** floci gives each service a
 `*.run.localhost.floci.io` URL and even runs an embedded DNS server for that
@@ -136,9 +141,7 @@ deploy `orders` pointing at them. On real GCP the URL is public DNS, so `orders`
 would use `module.inventory.uri` and one apply would be enough.
 
 Matching a container by name is a guess, so after discovering a port the script
-calls `/health` and checks the service name. That caught a real bug: in CI the
-discovery returned inventory's port for notifications and three integration tests
-failed for reasons that looked unrelated.
+calls `/health` and checks the service name.
 
 | Area | floci | Real GCP |
 |---|---|---|
@@ -148,8 +151,6 @@ failed for reasons that looked unrelated.
 | Environments | recreated per CI run | long lived |
 | Secrets | seeded every run | created once, rotated separately |
 | Discovery | published ports, two phases | Cloud Run URL, one apply |
-| Service auth | none | internal ingress + IAM invoker + ID tokens |
-| Registry | GHCR | Artifact Registry, same push-by-digest shape |
 
 ## Security choices
 
@@ -160,18 +161,13 @@ build from a lockfile with `npm ci`, and ship only compiled output and productio
 dependencies; `main` is protected with a required PR and a required check; the
 deploy job depends on tests and build, so a red test never reaches a deploy.
 
-**Images are tagged with the commit SHA but deployed by digest.** The tag makes
-the registry readable for a human; the digest is what Terraform receives. A tag
-can be repointed at different content by anyone who can push, a digest is a hash
-of the content itself. The build job captures the digest after the push and
-passes it to the deploy job.
+**Images are tagged with the commit SHA, but every deploy references the digest**
+  CI captures it after the push, and `terraform.tfvars` pins it for anything CI did
+  not rebuild.
 
 **Actions pinned to commit SHAs**, not tags. A tag like `@v4` can be moved by
 whoever owns the action, which would change what runs in my pipeline without any
 change on my side. The version is kept in a comment so the file stays readable.
-
-**Permissions per job.** The workflow defaults to `contents: read`. Only the
-build job gets `packages: write`, because only it publishes images.
 
 **Dependency scanning** with `npm audit --audit-level=high` on every run. Failing
 on high and critical, not on moderate: a gate that fires on everything gets
@@ -187,25 +183,16 @@ The first scan found 20 fixable HIGH/CRITICAL. None of them were in the
 application dependencies, which were clean. 18 came from the npm CLI's own
 bundled packages (tar, minimatch, glob, sigstore) and 2 from Alpine's openssl.
 npm is only needed to install dependencies, never at runtime, so the runtime
-stage now deletes npm and yarn in the same `RUN` as the install — a separate
+stage now deletes npm and yarn in the same `RUN` as the install, a separate
 layer would leave the files in the image. That removed all 18.
 
 The 2 openssl ones are fixed in Alpine 3.5.7-r0, but `node:20-alpine` has not
 been rebuilt with it. `apk upgrade` at build time would fix them, but it would
 also make two builds of the same commit produce different images, so I kept
 reproducibility instead. The CVE is in `.trivyignore` with the reason and an
-expiry date. That is one reviewed exception, not a lowered threshold: when it
-expires the build fails again and someone has to decide.
+expiry date. That is one reviewed exception.
 
 Left out on purpose:
-
-- **Service-to-service auth.** `orders` sends an API token, but nothing stops
-  anyone else from calling `inventory` directly. On real GCP I would restrict
-  ingress and require a Google ID token — that needs an application change, which
-  the assignment asks me not to make, so I described it instead.
-- **Signing and SBOM.** Only useful if something verifies them, and the
-  enforcement point (Binary Authorization) is exactly what floci cannot emulate.
-  Signing with no verification is decoration.
 
 - **Signing the base image choice.** The base image is pinned by tag
   (`node:20-alpine`), not by digest, so it can move. Pinning by digest would be
@@ -219,13 +206,15 @@ Left out on purpose:
   enough stock" and the client throws before the body is read. The caller gets
   `{"error": "upstream_failure"}` instead of a `rejected` order, and the order is
   never stored. From outside, "out of stock" looks like "the other service is
-  down". I did not change it — it is application logic — but my integration test
+  down". I did not change it, it is application logic, but my integration test
   asserts the real behaviour with a comment explaining why.
+
 - **Test scripts relied on shell glob expansion.** `node --test src/**/*.test.ts`
   worked locally and failed in CI: npm runs scripts with `sh`, which does not
   expand `**`. Quoting moved the problem to Node, whose glob support depends on
   the version (my machine has Node 24, CI pins Node 20). `$(find src -name
   '*.test.ts')` depends on neither.
+
 - **Committed `dist/` folders**, ignored by `.gitignore`. I built the repo from
   scratch so they never entered my history, and `.dockerignore` excludes them so
   containers always compile from source.
@@ -233,11 +222,9 @@ Left out on purpose:
 ## Next steps
 
 1. Real GCP identity: WIF, per-service runtime accounts, per-secret IAM bindings.
-2. Write the deployed digest back into `terraform.tfvars` from the pipeline, so
-   the manifest in the repo also carries digests and not only tags.
-3. Service-to-service authentication, which needs the application change
+2. Service-to-service authentication, which needs the application change
    described above.
-4. Watch the `.trivyignore` expiry and drop the entry once a patched
+3. Watch the `.trivyignore` expiry and drop the entry once a patched
    `node:20-alpine` is published.
 
 ## Known limitations
@@ -247,10 +234,10 @@ Left out on purpose:
   is large.
 - The graph only understands npm dependencies. If a service started reading a
   shared file that is not a dependency, the graph would miss it.
-- On floci the environment is recreated every CI run, so "we did not redeploy the
-  unchanged services" is true in the manifest but invisible at runtime.
-- Integration tests assume a fresh environment with known stock values.
-- Host tools: Docker, `make`, and `curl`, `jq`, `sed`, `base64`. Node, Terraform
-  and floci all run in pinned containers, and `make` is only a thin wrapper over
-  the scripts, but those utilities are still assumed to exist. On a clean Ubuntu
-  I had to install `make` myself.
+- Host tools: Docker, `make`, and `curl`, `sed`, `grep`, `base64`. Node,
+  Terraform and floci all run in pinned containers, and `make` is only a thin
+  wrapper over the scripts, but those utilities are still assumed to exist. I
+  found this out by testing on a clean machine: `make` was missing on Ubuntu and
+  `jq` was missing on Kali, so I dropped `jq` from the scripts and parse those
+  two small JSON responses with `grep` instead. CI still uses `jq`, since the
+  GitHub runners ship it and the parsing there is less trivial.

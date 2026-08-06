@@ -22,12 +22,12 @@ jobs:
       services: ${{ steps.affected.outputs.services }}
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # checkout v4
         with:
           fetch-depth: 0
 
       - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # setup-node v4
         with:
           node-version-file: starter/.nvmrc
 
@@ -91,10 +91,10 @@ jobs:
       images: ${{ steps.publish.outputs.images }}
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # checkout v4
 
       - name: Log in to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # login-action v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -133,9 +133,9 @@ jobs:
 
             docker push "$tag"
 
-            # The digest only exists once the image is in the registry. Deploys
-            # reference this, not the tag: a tag can be repointed at different
-            # content, a digest is a hash of the content itself.
+            # The digest only exists once the image is in the registry, so it is
+            # captured here and handed to the deploy job. Services this run did
+            # not rebuild get their digest from terraform.tfvars instead.
             digest=$(docker inspect --format='{{index .RepoDigests 0}}' "$tag")
             echo "$service -> $digest"
             images=$(echo "$images" | jq --arg s "$service" --arg d "$digest" '. + {($s): $d}')
@@ -156,12 +156,12 @@ jobs:
       packages: read
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # checkout v4
 
       # floci pulls images through the host Docker daemon, so this VM needs its
       # own registry credentials — the build job's login lives on another VM.
       - name: Log in to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # login-action v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -207,10 +207,10 @@ jobs:
       packages: read
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # checkout v4
 
       - name: Log in to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # login-action v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
