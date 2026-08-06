@@ -87,6 +87,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      images: ${{ steps.publish.outputs.images }}
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -103,9 +105,12 @@ jobs:
       # same reason Terraform does: the version is pinned here, not inherited
       # from the runner.
       - name: Build, scan and push affected service images
+        id: publish
         working-directory: starter
         run: |
           OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          images='{}'
+
           for dir in ${{ needs.test.outputs.services }}; do
             service=$(basename "$dir")
             tag="ghcr.io/$OWNER/$service:${{ github.sha }}"
@@ -127,7 +132,16 @@ jobs:
             echo "::endgroup::"
 
             docker push "$tag"
+
+            # The digest only exists once the image is in the registry. Deploys
+            # reference this, not the tag: a tag can be repointed at different
+            # content, a digest is a hash of the content itself.
+            digest=$(docker inspect --format='{{index .RepoDigests 0}}' "$tag")
+            echo "$service -> $digest"
+            images=$(echo "$images" | jq --arg s "$service" --arg d "$digest" '. + {($s): $d}')
           done
+
+          echo "images=$(echo "$images" | jq -c .)" >> "$GITHUB_OUTPUT"
 
   deploy-staging:
     needs: [test, build]
@@ -158,14 +172,18 @@ jobs:
       - name: Start floci-gcp
         run: make floci-up
 
+      # Only the services this run rebuilt get an image here. The rest keep what
+      # infra/envs/staging/terraform.tfvars pins.
       - name: Deploy staging
         env:
-          IMAGE_TAG: ${{ github.sha }}
-          GHCR_OWNER: ${{ github.repository_owner }}
-          AFFECTED_SERVICES: ${{ needs.test.outputs.services }}
+          IMAGES_JSON: ${{ needs.build.outputs.images }}
           INVENTORY_API_TOKEN: ${{ secrets.INVENTORY_API_TOKEN }}
           NOTIFICATIONS_API_TOKEN: ${{ secrets.NOTIFICATIONS_API_TOKEN }}
-        run: make deploy ENV=staging
+        run: |
+          export INVENTORY_IMAGE=$(echo "$IMAGES_JSON" | jq -r '.inventory // empty')
+          export NOTIFICATIONS_IMAGE=$(echo "$IMAGES_JSON" | jq -r '.notifications // empty')
+          export ORDERS_IMAGE=$(echo "$IMAGES_JSON" | jq -r '.orders // empty')
+          make deploy ENV=staging
 
       - name: Integration tests
         run: make integration-test ENV=staging

@@ -157,9 +157,14 @@ In place: no secret value in the repo, an image or a build argument; the seeding
 script never prints values; CI uses the automatic `GITHUB_TOKEN` for GHCR instead
 of a personal token I would have to store and rotate; images run as non-root,
 build from a lockfile with `npm ci`, and ship only compiled output and production
-dependencies; images are tagged with the commit SHA; `main` is protected with a
-required PR and a required check; the deploy job depends on tests and build, so a
-red test never reaches a deploy.
+dependencies; `main` is protected with a required PR and a required check; the
+deploy job depends on tests and build, so a red test never reaches a deploy.
+
+**Images are tagged with the commit SHA but deployed by digest.** The tag makes
+the registry readable for a human; the digest is what Terraform receives. A tag
+can be repointed at different content by anyone who can push, a digest is a hash
+of the content itself. The build job captures the digest after the push and
+passes it to the deploy job.
 
 **Actions pinned to commit SHAs**, not tags. A tag like `@v4` can be moved by
 whoever owns the action, which would change what runs in my pipeline without any
@@ -227,10 +232,12 @@ Left out on purpose:
 
 ## Next steps
 
-1. Reference images by digest, not tag. The build already prints the digest; I
-   would capture it and write it into `terraform.tfvars`.
-3. Real GCP identity: WIF, per-service runtime accounts, per-secret IAM bindings.
-5. Watch the `.trivyignore` expiry and drop the entry once a patched
+1. Real GCP identity: WIF, per-service runtime accounts, per-secret IAM bindings.
+2. Write the deployed digest back into `terraform.tfvars` from the pipeline, so
+   the manifest in the repo also carries digests and not only tags.
+3. Service-to-service authentication, which needs the application change
+   described above.
+4. Watch the `.trivyignore` expiry and drop the entry once a patched
    `node:20-alpine` is published.
 
 ## Known limitations

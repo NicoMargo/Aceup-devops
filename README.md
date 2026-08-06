@@ -109,8 +109,8 @@ curl -s "$ORDERS_URL/orders" -H 'content-type: application/json' \
 curl -s "$INVENTORY_URL/stock/SKU-TEE"   # stock went down by 2
 ```
 
-`prod` works the same way: `./scripts/deploy.sh prod`. It is a separate GCP
-project, so the two environments do not share secrets or services.
+`prod` works the same way: `make deploy ENV=prod`. It is a separate GCP project,
+so the two environments do not share secrets or services.
 
 ### Working on the code
 
@@ -145,11 +145,17 @@ separate CI-only path that could drift from what you tested by hand.
 
 ## Security checks in the pipeline
 
-- GitHub Actions pinned to commit SHAs, not tags.
+- GitHub Actions pinned to commit SHAs, not tags. Same for the tool images the
+  pipeline runs: Terraform, Trivy and floci are pinned by version or digest.
 - `npm audit --audit-level=high` fails the run.
 - Trivy scans each image **before** it is pushed. Fixable HIGH and CRITICAL fail
   the build. Exceptions live in `.trivyignore` with a reason and an expiry date.
+- Images are tagged with the commit SHA but **deployed by digest**. The tag makes
+  the registry readable; the digest is a hash of the content, so it cannot be
+  repointed at something else.
 - Only the build job can write packages; everything else is read only.
+- Staging and prod have different API tokens, stored as GitHub Environment
+  secrets. A leaked staging token is useless against prod.
 - No secret value is in the repo, in an image, or in a build argument. Tokens
   arrive as environment variables at runtime, and the seeding script never logs
   a value.
@@ -157,12 +163,13 @@ separate CI-only path that could drift from what you tested by hand.
 ## Operations
 
 ```bash
-# which revision is live
-curl -s "http://localhost:4588/v2/projects/floci-staging/locations/us-central1/services" | jq
+# what is deployed, and which revision is serving (swap the project for prod)
+curl -s "http://localhost:4588/v2/projects/floci-staging/locations/us-central1/services" \
+  | jq '.services[] | {name, uri, revision: .latestReadyRevision}'
 
 # roll back one service: put its previous image back in the tfvars and redeploy
 git revert <commit>            # or edit infra/envs/staging/terraform.tfvars
-./scripts/deploy.sh staging
+make deploy ENV=staging
 ```
 
 Rollback is per service, because each service has its own image line in the

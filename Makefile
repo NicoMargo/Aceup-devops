@@ -1,5 +1,8 @@
 NODE_IMAGE  ?= node:20-alpine
-FLOCI_IMAGE ?= floci/floci-gcp:latest
+# Pinned by digest, not :latest — the emulator is what the whole deploy path
+# depends on, so a silent change there would change the pipeline underneath us.
+# This is floci-gcp 0.6.0.
+FLOCI_IMAGE ?= floci/floci-gcp@sha256:fe61b4824d52de128846384c33a94600c1c63aeafe92c3319ee723f59a16d4c1
 ENV         ?= staging
 
 # npm runs in a container so its Node version is pinned and nothing has to be
