@@ -1,27 +1,33 @@
 name: CI
 
+# Actions are pinned to commit SHAs, not tags. A tag like @v4 can be moved to a
+# different commit by whoever owns the action, which would silently change what
+# runs in this pipeline. The version each SHA corresponds to is in the comment.
 on:
   pull_request:
   push:
     branches: [main]
 
+# Least privilege by default: only the job that publishes images gets write
+# access to packages.
 permissions:
   contents: read
-  packages: write
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       services: ${{ steps.affected.outputs.services }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: starter/.nvmrc
 
@@ -57,6 +63,13 @@ jobs:
         working-directory: starter
         run: npm ci
 
+      # Fails on high and critical only. Moderate findings stay visible in the
+      # log but do not block, otherwise the gate gets bypassed and stops meaning
+      # anything.
+      - name: Audit dependencies
+        working-directory: starter
+        run: npm audit --audit-level=high
+
       - name: Run tests for affected packages
         working-directory: starter
         run: |
@@ -71,26 +84,48 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     if: needs.test.outputs.services != ''
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push affected service images
+      # Scanning happens between build and push, so an image that fails the
+      # policy never reaches the registry. Trivy runs as a container for the
+      # same reason Terraform does: the version is pinned here, not inherited
+      # from the runner.
+      - name: Build, scan and push affected service images
         working-directory: starter
         run: |
           OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           for dir in ${{ needs.test.outputs.services }}; do
             service=$(basename "$dir")
             tag="ghcr.io/$OWNER/$service:${{ github.sha }}"
-            echo "Building $service from $dir -> $tag"
+
+            echo "::group::build $service"
             docker build -f "$dir/Dockerfile" -t "$tag" .
+            echo "::endgroup::"
+
+            echo "::group::scan $service"
+            docker run --rm \
+              -v /var/run/docker.sock:/var/run/docker.sock \
+              -v "${{ github.workspace }}/.trivyignore:/.trivyignore:ro" \
+              aquasec/trivy:0.73.0 image \
+              --exit-code 1 \
+              --severity HIGH,CRITICAL \
+              --ignore-unfixed \
+              --ignorefile /.trivyignore \
+              "$tag"
+            echo "::endgroup::"
+
             docker push "$tag"
           done
 
@@ -98,14 +133,17 @@ jobs:
     needs: [test, build]
     if: needs.test.outputs.services != ''
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # floci pulls images through the host Docker daemon, so this VM needs its
       # own registry credentials — the build job's login lives on another VM.
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
