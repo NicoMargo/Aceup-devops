@@ -28,12 +28,46 @@ tf() {
     "$TF_IMAGE" "$@"
 }
 
-# CI passes an immutable per-commit reference; local runs fall back to tfvars.
-image_override=()
-if [ -n "${IMAGE_TAG:-}" ]; then
-  owner="${GHCR_OWNER:-nicomargo}"
-  image_override=(-var "images={inventory=\"ghcr.io/${owner}/inventory:${IMAGE_TAG}\",notifications=\"ghcr.io/${owner}/notifications:${IMAGE_TAG}\",orders=\"ghcr.io/${owner}/orders:${IMAGE_TAG}\"}")
-fi
+# Resolve each service's image independently. A service rebuilt by this
+# pipeline run moves to the new immutable tag; every other service keeps
+# whatever terraform.tfvars already pins. That file is therefore the manifest
+# of what is deployed where, which also makes rollback a git revert and
+# promotion a copy of values from one environment's tfvars to the other's.
+tfvars_image() {
+  sed -n "s/.*$1[[:space:]]*=[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$TFVARS"
+}
+
+# Accepts either "inventory orders" or "services/inventory services/orders".
+affected_normalized=" $(echo "${AFFECTED_SERVICES:-}" | sed 's#services/##g') "
+
+resolve_image() {
+  local service="$1"
+
+  if [ -z "${IMAGE_TAG:-}" ]; then
+    tfvars_image "$service"
+    return
+  fi
+
+  # No affected list means "this tag applies to everything" (manual deploys).
+  if [ -n "${AFFECTED_SERVICES:-}" ] && [[ "$affected_normalized" != *" ${service} "* ]]; then
+    tfvars_image "$service"
+    return
+  fi
+
+  # OCI repository names must be lowercase; github.repository_owner is not.
+  echo "ghcr.io/$(echo "${GHCR_OWNER:-nicomargo}" | tr '[:upper:]' '[:lower:]')/${service}:${IMAGE_TAG}"
+}
+
+inventory_image=$(resolve_image inventory)
+notifications_image=$(resolve_image notifications)
+orders_image=$(resolve_image orders)
+
+images_var="images={inventory=\"${inventory_image}\",notifications=\"${notifications_image}\",orders=\"${orders_image}\"}"
+
+echo "resolved images:"
+echo "  inventory     ${inventory_image}"
+echo "  notifications ${notifications_image}"
+echo "  orders        ${orders_image}"
 
 service_name() {
   tf output -json service_names | jq -r ".$1"
@@ -53,13 +87,20 @@ echo "==> terraform init"
 tf init -input=false
 
 echo "==> phase 1: services without runtime dependencies"
-tf apply -auto-approve -input=false "${image_override[@]}"
+# Scoped with -target so the absence of the upstream URLs in this phase does not
+# make orders' count evaluate to 0, which would destroy and recreate it on every
+# single deploy. -target is normally a smell, but here it is precisely the point:
+# this phase exists only to bring up the services orders depends on. Phase 2 is
+# a full apply, so the final state always converges on the configuration.
+tf apply -auto-approve -input=false -var "$images_var" \
+  -target=module.platform.module.inventory \
+  -target=module.platform.module.notifications
 
 inventory_port=$(published_port "$(service_name inventory)")
 notifications_port=$(published_port "$(service_name notifications)")
 
 echo "==> phase 2: orders, wired to the discovered upstreams"
-tf apply -auto-approve -input=false "${image_override[@]}" \
+tf apply -auto-approve -input=false -var "$images_var" \
   -var "inventory_base_url=http://host.docker.internal:${inventory_port}" \
   -var "notifications_base_url=http://host.docker.internal:${notifications_port}"
 

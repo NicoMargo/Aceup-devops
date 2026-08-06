@@ -41,6 +41,7 @@ module "notifications" {
 # service-to-service DNS, so these are discovered from the host-published ports
 # after inventory/notifications are up. On real GCP the module outputs' `uri`
 # would be used directly and this two-phase split would not be needed.
+
 module "orders" {
   source = "../cloud-run-service"
   count  = local.orders_ready ? 1 : 0
