@@ -47,10 +47,21 @@ the image only for the services it rebuilt; the rest stay on what the file pins.
 So the repo always says which version runs where, rollback is a git revert plus a
 redeploy, and promotion is copying image values from one tfvars to the other.
 
-For prod I would require manual approval (GitHub Environments with reviewers)
-instead of promoting automatically after staging. The integration tests are small,
-so I do not have enough confidence to skip a human. **Designed, not implemented
-yet.**
+Promotion is a commit, not a pipeline trigger. `scripts/promote.sh` copies the
+image values from the staging tfvars into the prod one; that change goes through
+a pull request, and merging it to `main` runs the prod deploy. The prod job
+deploys exactly what its tfvars pins — it never overrides the image with the
+commit SHA, or the file would stop being the record of what runs.
+
+There are two checkpoints: the review of the promotion PR, and a GitHub
+Environment (`production`) with required reviewers that holds the job until
+someone approves it. I chose manual approval over promoting automatically after
+staging because the integration tests here are small, so I do not have enough
+confidence to skip a human. The cost is one click.
+
+On floci this proves the mechanism but not much else: the prod job deploys into
+an emulator that lives for the length of the job. A real prod is only meaningful
+when the target is actual GCP.
 
 ## Secrets
 
@@ -216,8 +227,7 @@ Left out on purpose:
 
 ## Next steps
 
-1. The prod promotion job with a GitHub Environment and required reviewers.
-2. Reference images by digest, not tag. The build already prints the digest; I
+1. Reference images by digest, not tag. The build already prints the digest; I
    would capture it and write it into `terraform.tfvars`.
 3. Real GCP identity: WIF, per-service runtime accounts, per-secret IAM bindings.
 5. Watch the `.trivyignore` expiry and drop the entry once a patched

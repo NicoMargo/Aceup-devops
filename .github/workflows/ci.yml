@@ -133,6 +133,10 @@ jobs:
     needs: [test, build]
     if: needs.test.outputs.services != ''
     runs-on: ubuntu-latest
+    # No protection rules here — declaring the environment is what gives the job
+    # access to this environment's secrets, so staging and prod use different
+    # API tokens.
+    environment: staging
     permissions:
       contents: read
       packages: read
@@ -168,6 +172,46 @@ jobs:
 
       - name: Negative path — services fail closed without their secrets
         run: make test-secrets
+
+      - name: Emulator logs on failure
+        if: failure()
+        run: docker logs floci-gcp
+
+  deploy-prod:
+    needs: [test, build, deploy-staging]
+    # Only on main, and only once staging deployed and passed its tests.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # GitHub holds this job until a reviewer approves it.
+    environment: production
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Start floci-gcp
+        run: make floci-up
+
+      # No IMAGE_TAG on purpose: prod deploys exactly what
+      # infra/envs/prod/terraform.tfvars pins, and that file only changes through
+      # a reviewed promotion commit (see scripts/promote.sh).
+      - name: Deploy prod
+        env:
+          INVENTORY_API_TOKEN: ${{ secrets.INVENTORY_API_TOKEN }}
+          NOTIFICATIONS_API_TOKEN: ${{ secrets.NOTIFICATIONS_API_TOKEN }}
+        run: make deploy ENV=prod
+
+      - name: Smoke tests
+        run: make integration-test ENV=prod
 
       - name: Emulator logs on failure
         if: failure()

@@ -168,6 +168,19 @@ git revert <commit>            # or edit infra/envs/staging/terraform.tfvars
 Rollback is per service, because each service has its own image line in the
 tfvars.
 
+**Promoting to prod:**
+
+```bash
+./scripts/promote.sh    # copies the staging images into the prod tfvars
+git checkout -b promote/$(date +%F)
+git commit -am "Promote staging images to prod"
+```
+
+Open a pull request with that change. Merging it to `main` runs the prod deploy,
+which waits for an approval in the `production` GitHub Environment before it
+starts. The prod job deploys what the tfvars says — it never picks the image
+itself, so the file is always the record of what runs in prod.
+
 **Secret rotation:** add a new version of the secret, then deploy a new
 revision. Services read the secret once at startup, so a running container keeps
 the old value until it is replaced. Traffic only moves to the new revision once
