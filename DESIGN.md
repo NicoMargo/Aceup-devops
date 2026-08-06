@@ -2,6 +2,28 @@
 
 Decisions I made, why, and what I left out.
 
+## What happens when you push
+
+1. **You open or update a pull request.** CI starts.
+2. **`test`** diffs your branch against its base, feeds the changed files to
+   `affected-packages.js`, and runs the unit tests only for the packages that come
+   back. It also runs `npm audit`, which fails on high or critical.
+3. **`build`** runs only if something is affected. For each affected service it
+   builds the image, scans it with Trivy, and pushes it to GHCR **in that order**,
+   so an image that fails the scan never reaches the registry. Then it reads back
+   the digest of what it pushed.
+4. **`deploy-staging`** starts a fresh floci emulator inside the runner, seeds the
+   secrets from the environment's GitHub secrets, and applies Terraform in two
+   phases. Services this run rebuilt get the new digest; the rest get what
+   `infra/envs/staging/terraform.tfvars` pins. Then it runs the integration tests
+   against the deployed services and checks they fail closed without a secret.
+5. **If anything above fails, the pull request cannot be merged.**
+6. **You merge to `main`.** The same three jobs run again, and then `deploy-prod`
+   appears and waits, GitHub holds it until someone approves the `production`
+   environment. It deploys exactly what the prod tfvars pins.
+7. **Promoting is a separate change.** `scripts/promote.sh` copies the staging
+   digests into the prod tfvars, and that edit goes through its own pull request.
+
 ## Change detection
 
 I did not want a hardcoded map like "if `services/orders/**` changed, deploy
