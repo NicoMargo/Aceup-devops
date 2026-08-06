@@ -47,10 +47,21 @@ the image only for the services it rebuilt; the rest stay on what the file pins.
 So the repo always says which version runs where, rollback is a git revert plus a
 redeploy, and promotion is copying image values from one tfvars to the other.
 
-For prod I would require manual approval (GitHub Environments with reviewers)
-instead of promoting automatically after staging. The integration tests are small,
-so I do not have enough confidence to skip a human. **Designed, not implemented
-yet.**
+Promotion is a commit, not a pipeline trigger. `scripts/promote.sh` copies the
+image values from the staging tfvars into the prod one; that change goes through
+a pull request, and merging it to `main` runs the prod deploy. The prod job
+deploys exactly what its tfvars pins — it never overrides the image with the
+commit SHA, or the file would stop being the record of what runs.
+
+There are two checkpoints: the review of the promotion PR, and a GitHub
+Environment (`production`) with required reviewers that holds the job until
+someone approves it. I chose manual approval over promoting automatically after
+staging because the integration tests here are small, so I do not have enough
+confidence to skip a human. The cost is one click.
+
+On floci this proves the mechanism but not much else: the prod job deploys into
+an emulator that lives for the length of the job. A real prod is only meaningful
+when the target is actual GCP.
 
 ## Secrets
 
@@ -146,9 +157,14 @@ In place: no secret value in the repo, an image or a build argument; the seeding
 script never prints values; CI uses the automatic `GITHUB_TOKEN` for GHCR instead
 of a personal token I would have to store and rotate; images run as non-root,
 build from a lockfile with `npm ci`, and ship only compiled output and production
-dependencies; images are tagged with the commit SHA; `main` is protected with a
-required PR and a required check; the deploy job depends on tests and build, so a
-red test never reaches a deploy.
+dependencies; `main` is protected with a required PR and a required check; the
+deploy job depends on tests and build, so a red test never reaches a deploy.
+
+**Images are tagged with the commit SHA but deployed by digest.** The tag makes
+the registry readable for a human; the digest is what Terraform receives. A tag
+can be repointed at different content by anyone who can push, a digest is a hash
+of the content itself. The build job captures the digest after the push and
+passes it to the deploy job.
 
 **Actions pinned to commit SHAs**, not tags. A tag like `@v4` can be moved by
 whoever owns the action, which would change what runs in my pipeline without any
@@ -216,12 +232,12 @@ Left out on purpose:
 
 ## Next steps
 
-1. The prod promotion job with a GitHub Environment and required reviewers.
-2. Reference images by digest, not tag. The build already prints the digest; I
-   would capture it and write it into `terraform.tfvars`.
-3. A Makefile as the single entry point for developers and CI.
-4. Real GCP identity: WIF, per-service runtime accounts, per-secret IAM bindings.
-5. Watch the `.trivyignore` expiry and drop the entry once a patched
+1. Real GCP identity: WIF, per-service runtime accounts, per-secret IAM bindings.
+2. Write the deployed digest back into `terraform.tfvars` from the pipeline, so
+   the manifest in the repo also carries digests and not only tags.
+3. Service-to-service authentication, which needs the application change
+   described above.
+4. Watch the `.trivyignore` expiry and drop the entry once a patched
    `node:20-alpine` is published.
 
 ## Known limitations
@@ -234,5 +250,7 @@ Left out on purpose:
 - On floci the environment is recreated every CI run, so "we did not redeploy the
   unchanged services" is true in the manifest but invisible at runtime.
 - Integration tests assume a fresh environment with known stock values.
-- Host tools: Docker plus `curl`, `jq`, `sed` and `base64`. Node, Terraform and
-  floci all run in pinned containers, but those four utilities are assumed.
+- Host tools: Docker, `make`, and `curl`, `jq`, `sed`, `base64`. Node, Terraform
+  and floci all run in pinned containers, and `make` is only a thin wrapper over
+  the scripts, but those utilities are still assumed to exist. On a clean Ubuntu
+  I had to install `make` myself.

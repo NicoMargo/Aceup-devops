@@ -1,108 +1,118 @@
 #!/usr/bin/env node
+//
+// Works out which packages and services are affected by a list of changed files.
+//
+//   node affected-packages.js <file> [file...]
+//
+// The graph comes from the repo itself, so adding a service or changing a
+// dependency needs no change here.
+
 const fs = require("fs");
 const path = require("path");
 
-const ROOT = path.resolve(__dirname, ".."); // starter/
-const WORKSPACE_GROUPS = ["packages", "services"];
+// This script lives in starter/scripts, so the monorepo root is one level up.
+const ROOT = path.resolve(__dirname, "..");
+const GROUPS = ["packages", "services"];
 
-function listWorkspaces() {
-const workspaces = [];
-for (const group of WORKSPACE_GROUPS) {
-    const groupDir = path.join(ROOT, group);
-    if (!fs.existsSync(groupDir)) continue;
-    for (const name of fs.readdirSync(groupDir)) {
-    const dir = path.join(groupDir, name);
-    const pkgJsonPath = path.join(dir, "package.json");
-    if (fs.statSync(dir).isDirectory() && fs.existsSync(pkgJsonPath)) {
-        const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, "utf8"));
-        workspaces.push({
-        name: pkg.name,
-        dir: path.relative(ROOT, dir).split(path.sep).join("/"), // "packages/logger"
-        deps: Object.keys(pkg.dependencies ?? {}).filter((d) => d.startsWith("@aceup/")),
+// Read every workspace: its npm name, its folder, and which internal packages
+// it depends on.
+function readWorkspaces() {
+  const workspaces = [];
+
+  for (const group of GROUPS) {
+    const groupPath = path.join(ROOT, group);
+    if (!fs.existsSync(groupPath)) continue;
+
+    for (const folder of fs.readdirSync(groupPath)) {
+      const manifest = path.join(groupPath, folder, "package.json");
+      if (!fs.existsSync(manifest)) continue;
+
+      const pkg = JSON.parse(fs.readFileSync(manifest, "utf8"));
+
+      workspaces.push({
+        name: pkg.name,             // "@aceup/orders-service"
+        dir: `${group}/${folder}`,  // "services/orders"
         isService: group === "services",
-        });
+        // Only our own packages matter. express and the rest do not.
+        deps: Object.keys(pkg.dependencies ?? {}).filter((d) => d.startsWith("@aceup/")),
+      });
     }
-    }
-}
-return workspaces; 
-}
+  }
 
-function buildDependentsGraph(workspaces) {
-const dependents = new Map(workspaces.map((w) => [w.name, []]));
-for (const w of workspaces) {
-    for (const dep of w.deps) {
-    dependents.get(dep)?.push(w.name);
-    }
-}
-return dependents;
-} 
-
-function ownerOf(fileRelativeToStarter, workspaces) {
-const matches = workspaces.filter(
-    (w) => fileRelativeToStarter === w.dir || fileRelativeToStarter.startsWith(w.dir + "/")
-);
-matches.sort((a, b) => b.dir.length - a.dir.length); // longest prefix wins
-return matches[0] ?? null;
+  return workspaces;
 }
 
-function computeAffected(changedFilesFromRepoRoot, workspaces) {
-const dependents = buildDependentsGraph(workspaces);
-const directlyChanged = new Set();
-let rootChange = false;
+// Which workspace does this file belong to? The one with the longest matching
+// folder, so "services/orders" wins over a shorter path.
+function ownerOf(file, workspaces) {
+  return workspaces
+    .filter((w) => file === w.dir || file.startsWith(`${w.dir}/`))
+    .sort((a, b) => b.dir.length - a.dir.length)[0];
+}
 
-for (const file of changedFilesFromRepoRoot) {
-      if (!file.startsWith("starter/")) {
-        rootChange = true; // change outside the monorepo root (e.g. CI workflow) — safer to rebuild everything
-        continue;
+// Add everything that depends on these packages, directly or through another
+// package. Keep going until nothing new shows up.
+function withDependents(names, workspaces) {
+  const affected = new Set(names);
+  const queue = [...names];
+
+  while (queue.length > 0) {
+    const current = queue.pop();
+
+    for (const w of workspaces) {
+      if (w.deps.includes(current) && !affected.has(w.name)) {
+        affected.add(w.name);
+        queue.push(w.name);
       }
-    const relative = file.slice("starter/".length);
-    const owner = ownerOf(relative, workspaces);
-    if (owner) {
-    directlyChanged.add(owner.name);
-    } else {
-    rootChange = true; // inside starter/, but not owned by any workspace
     }
-}
+  }
 
-if (rootChange) {
-    return { rootChange: true, affected: workspaces.map((w) => w.name) };
+  return affected;
 }
-
-const affected = new Set(directlyChanged);
-const stack = [...directlyChanged]; 
-while (stack.length > 0) {
-    const current = stack.pop();
-    for (const dependent of dependents.get(current) ?? []) {
-    if (!affected.has(dependent)) {
-        affected.add(dependent);
-        stack.push(dependent);
-    }
-    }
-}
-return { rootChange: false, affected: [...affected] };
-} 
 
 function main() {
-const changedFiles = process.argv.slice(2).filter(Boolean);
-if (changedFiles.length === 0) {
-    console.error("Usage: node affected-packages.cjs <file1> <file2> ...");
+  const changedFiles = process.argv.slice(2).filter(Boolean);
+
+  if (changedFiles.length === 0) {
+    console.error("usage: node affected-packages.js <file> [file...]");
     process.exit(1);
-}
+  }
 
-const workspaces = listWorkspaces();
-const byName = new Map(workspaces.map((w) => [w.name, w]));
-const result = computeAffected(changedFiles, workspaces);
+  const workspaces = readWorkspaces();
+  const changed = new Set();
+  let rootChange = false;
 
-const affectedServices = result.affected
-    .map((name) => byName.get(name))
-    .filter((w) => w?.isService)
+  for (const file of changedFiles) {
+    // git runs at the repo root, one level above starter/.
+    if (!file.startsWith("starter/")) {
+      // CI config, infra, docs. We cannot tell what they affect, so rebuild all.
+      rootChange = true;
+      continue;
+    }
+
+    const owner = ownerOf(file.slice("starter/".length), workspaces);
+
+    if (owner) {
+      changed.add(owner.name);
+    } else {
+      // Lockfile, root package.json, scripts: same reasoning as above.
+      rootChange = true;
+    }
+  }
+
+  const affected = rootChange
+    ? new Set(workspaces.map((w) => w.name))
+    : withDependents([...changed], workspaces);
+
+  const services = workspaces
+    .filter((w) => w.isService && affected.has(w.name))
     .map((w) => w.dir);
 
-console.log(JSON.stringify({
-    rootChange: result.rootChange,
-    affectedPackages: result.affected,
-    affectedServices,
-}, null, 2));
-} 
+  console.log(JSON.stringify({
+    rootChange,
+    affectedPackages: [...affected],
+    affectedServices: services,
+  }, null, 2));
+}
 
 main();

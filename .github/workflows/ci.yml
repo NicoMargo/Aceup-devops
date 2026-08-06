@@ -87,6 +87,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      images: ${{ steps.publish.outputs.images }}
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -103,9 +105,12 @@ jobs:
       # same reason Terraform does: the version is pinned here, not inherited
       # from the runner.
       - name: Build, scan and push affected service images
+        id: publish
         working-directory: starter
         run: |
           OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          images='{}'
+
           for dir in ${{ needs.test.outputs.services }}; do
             service=$(basename "$dir")
             tag="ghcr.io/$OWNER/$service:${{ github.sha }}"
@@ -127,12 +132,25 @@ jobs:
             echo "::endgroup::"
 
             docker push "$tag"
+
+            # The digest only exists once the image is in the registry. Deploys
+            # reference this, not the tag: a tag can be repointed at different
+            # content, a digest is a hash of the content itself.
+            digest=$(docker inspect --format='{{index .RepoDigests 0}}' "$tag")
+            echo "$service -> $digest"
+            images=$(echo "$images" | jq --arg s "$service" --arg d "$digest" '. + {($s): $d}')
           done
+
+          echo "images=$(echo "$images" | jq -c .)" >> "$GITHUB_OUTPUT"
 
   deploy-staging:
     needs: [test, build]
     if: needs.test.outputs.services != ''
     runs-on: ubuntu-latest
+    # No protection rules here — declaring the environment is what gives the job
+    # access to this environment's secrets, so staging and prod use different
+    # API tokens.
+    environment: staging
     permissions:
       contents: read
       packages: read
@@ -149,42 +167,69 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # floci runs Cloud Run containers through the host Docker daemon, so it
-      # needs the socket mounted — this is what `floci gcp start` does for you
-      # locally, and omitting it makes every deploy fail with a socket error.
+      # Every step below is a make target a developer also runs locally, so there
+      # is no CI-only path that can drift from what was tested by hand.
       - name: Start floci-gcp
-        run: |
-          docker run -d --name floci-gcp \
-            -p 4588:4588 \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            floci/floci-gcp:latest
-          for _ in $(seq 1 30); do
-            if curl -sf "http://localhost:4588/v1/projects/readiness-probe/secrets" >/dev/null; then
-              echo "floci is ready"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "floci did not become ready" >&2
-          docker logs floci-gcp
-          exit 1
+        run: make floci-up
 
-      # The same entrypoint a developer runs locally — there is no CI-only
-      # deploy path that could drift from it.
+      # Only the services this run rebuilt get an image here. The rest keep what
+      # infra/envs/staging/terraform.tfvars pins.
       - name: Deploy staging
         env:
-          IMAGE_TAG: ${{ github.sha }}
-          GHCR_OWNER: ${{ github.repository_owner }}
-          AFFECTED_SERVICES: ${{ needs.test.outputs.services }}
+          IMAGES_JSON: ${{ needs.build.outputs.images }}
           INVENTORY_API_TOKEN: ${{ secrets.INVENTORY_API_TOKEN }}
           NOTIFICATIONS_API_TOKEN: ${{ secrets.NOTIFICATIONS_API_TOKEN }}
-        run: ./scripts/deploy.sh staging
+        run: |
+          export INVENTORY_IMAGE=$(echo "$IMAGES_JSON" | jq -r '.inventory // empty')
+          export NOTIFICATIONS_IMAGE=$(echo "$IMAGES_JSON" | jq -r '.notifications // empty')
+          export ORDERS_IMAGE=$(echo "$IMAGES_JSON" | jq -r '.orders // empty')
+          make deploy ENV=staging
 
       - name: Integration tests
-        run: ./scripts/integration-test.sh staging
+        run: make integration-test ENV=staging
 
       - name: Negative path — services fail closed without their secrets
-        run: ./scripts/test-missing-secret.sh
+        run: make test-secrets
+
+      - name: Emulator logs on failure
+        if: failure()
+        run: docker logs floci-gcp
+
+  deploy-prod:
+    needs: [test, build, deploy-staging]
+    # Only on main, and only once staging deployed and passed its tests.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # GitHub holds this job until a reviewer approves it.
+    environment: production
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Start floci-gcp
+        run: make floci-up
+
+      # No IMAGE_TAG on purpose: prod deploys exactly what
+      # infra/envs/prod/terraform.tfvars pins, and that file only changes through
+      # a reviewed promotion commit (see scripts/promote.sh).
+      - name: Deploy prod
+        env:
+          INVENTORY_API_TOKEN: ${{ secrets.INVENTORY_API_TOKEN }}
+          NOTIFICATIONS_API_TOKEN: ${{ secrets.NOTIFICATIONS_API_TOKEN }}
+        run: make deploy ENV=prod
+
+      - name: Smoke tests
+        run: make integration-test ENV=prod
 
       - name: Emulator logs on failure
         if: failure()

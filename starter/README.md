@@ -1,3 +1,19 @@
+> **Note added by me — the original starter README is unchanged below.**
+>
+> Two things in it no longer apply:
+>
+> - It says to export `SECRETMANAGER_EMULATOR_HOST`. `floci gcp env` exports
+>   `SECRET_MANAGER_EMULATOR_HOST`, with the underscore. The as-shipped secrets
+>   client did not read either one — see DESIGN.md in the repo root.
+> - The `gcloud secrets create ...` examples are replaced by
+>   `scripts/seed-secrets.sh`, which uses the REST API and needs no gcloud.
+>
+> To run the whole system, use the README in the repo root, not this file.
+> Everything below still describes the services correctly: ports, the secrets
+> each one needs, and the endpoints.
+
+---
+
 # AceUp DevOps homework — starter services
 
 Tiny TypeScript monorepo starter for the differential-delivery homework.

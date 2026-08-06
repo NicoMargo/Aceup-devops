@@ -29,19 +29,22 @@ tf() {
     "$TF_IMAGE" "$@"
 }
 
-# Override the image only for services this run rebuilt. Terraform's variable
-# precedence leaves every other service on whatever terraform.tfvars pins, so
-# the pipeline never needs to know the previous versions.
+# A service is overridden only if its image was passed in as INVENTORY_IMAGE,
+# NOTIFICATIONS_IMAGE or ORDERS_IMAGE. Everything else stays on what
+# terraform.tfvars pins, which is what keeps the deploy differential: the
+# pipeline never needs to know the previous versions.
+#
+# CI passes digest references (repo@sha256:...), not tags. A tag can be moved to
+# point at different content; a digest is a hash of the content itself.
 image_args=()
-if [ -n "${IMAGE_TAG:-}" ]; then
-  # OCI repository names must be lowercase; github.repository_owner is not.
-  owner=$(echo "${GHCR_OWNER:-nicomargo}" | tr '[:upper:]' '[:lower:]')
-  for service in ${AFFECTED_SERVICES:-inventory notifications orders}; do
-    service=${service#services/}
-    image_args+=(-var "${service}_image=ghcr.io/${owner}/${service}:${IMAGE_TAG}")
-    echo "overriding ${service} -> ghcr.io/${owner}/${service}:${IMAGE_TAG}"
-  done
-fi
+for service in inventory notifications orders; do
+  var="$(echo "$service" | tr '[:lower:]' '[:upper:]')_IMAGE"
+  value="${!var:-}"
+  if [ -n "$value" ]; then
+    image_args+=(-var "${service}_image=${value}")
+    echo "overriding ${service} -> ${value}"
+  fi
+done
 
 # floci names containers floci-gcp-cloudrun-<service>-<revision>-<uuid>; anchor
 # the match so one service can never be picked up by another's filter.
