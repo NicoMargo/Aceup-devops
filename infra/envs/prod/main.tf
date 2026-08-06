@@ -17,13 +17,19 @@ variable "name_prefix" {
   type        = string
 }
 
-variable "images" {
-  description = "Container image reference per service"
-  type = object({
-    inventory     = string
-    notifications = string
-    orders        = string
-  })
+variable "inventory_image" {
+  description = "Container image for inventory"
+  type        = string
+}
+
+variable "notifications_image" {
+  description = "Container image for notifications"
+  type        = string
+}
+
+variable "orders_image" {
+  description = "Container image for orders"
+  type        = string
 }
 
 variable "floci_endpoint" {
@@ -66,8 +72,11 @@ module "platform" {
 
   project       = var.project
   name_prefix   = var.name_prefix
-  images        = var.images
   emulator_host = var.emulator_host
+
+  inventory_image     = var.inventory_image
+  notifications_image = var.notifications_image
+  orders_image        = var.orders_image
 
   inventory_base_url     = var.inventory_base_url
   notifications_base_url = var.notifications_base_url

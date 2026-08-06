@@ -20,13 +20,23 @@ variable "name_prefix" {
   default     = ""
 }
 
-variable "images" {
-  description = "Container image reference per service (prefer digest-pinned)"
-  type = object({
-    inventory     = string
-    notifications = string
-    orders        = string
-  })
+# One variable per service rather than a single object, so a deploy can override
+# just the services it rebuilt and let Terraform's variable precedence leave the
+# rest on whatever terraform.tfvars pins. That is what makes the deploy
+# differential without the pipeline having to know the previous image versions.
+variable "inventory_image" {
+  description = "Container image for inventory (prefer digest-pinned)"
+  type        = string
+}
+
+variable "notifications_image" {
+  description = "Container image for notifications (prefer digest-pinned)"
+  type        = string
+}
+
+variable "orders_image" {
+  description = "Container image for orders (prefer digest-pinned)"
+  type        = string
 }
 
 variable "emulator_host" {

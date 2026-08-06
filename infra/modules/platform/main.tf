@@ -21,7 +21,7 @@ module "inventory" {
   project        = var.project
   location       = var.location
   name           = "${var.name_prefix}inventory"
-  image          = var.images.inventory
+  image          = var.inventory_image
   container_port = local.ports.inventory
   env_vars       = local.common_env
 }
@@ -32,7 +32,7 @@ module "notifications" {
   project        = var.project
   location       = var.location
   name           = "${var.name_prefix}notifications"
-  image          = var.images.notifications
+  image          = var.notifications_image
   container_port = local.ports.notifications
   env_vars       = local.common_env
 }
@@ -49,7 +49,7 @@ module "orders" {
   project        = var.project
   location       = var.location
   name           = "${var.name_prefix}orders"
-  image          = var.images.orders
+  image          = var.orders_image
   container_port = local.ports.orders
 
   env_vars = merge(local.common_env, {
