@@ -20,7 +20,7 @@ ENDPOINT="${FLOCI_ENDPOINT:-http://localhost:4588}"
 TFVARS="${REPO_ROOT}/infra/envs/staging/terraform.tfvars"
 EMPTY_PROJECT="floci-no-secrets-here"
 
-IMAGE=$(sed -n 's/.*inventory[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$TFVARS")
+IMAGE=$(sed -n 's/^[[:space:]]*inventory_image[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$TFVARS")
 [ -n "$IMAGE" ] || { echo "could not resolve the inventory image from ${TFVARS}" >&2; exit 1; }
 
 echo "==> container-level: inventory must refuse to start without its secret"
