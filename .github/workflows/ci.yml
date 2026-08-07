@@ -2,11 +2,15 @@ name: CI
 
 # Actions are pinned to commit SHAs, not tags. A tag like @v4 can be moved to a
 # different commit by whoever owns the action, which would silently change what
-# runs in this pipeline. The version each SHA corresponds to is in the comment.
+# runs in this pipeline. 
 on:
   pull_request:
   push:
     branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 # Least privilege by default: only the job that publishes images gets write
 # access to packages.
@@ -39,6 +43,11 @@ jobs:
             BASE_SHA="${{ github.event.pull_request.base.sha }}"
           else
             BASE_SHA="${{ github.event.before }}"
+
+            # case if it's the first commit, (this can be better)
+            if [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+              BASE_SHA="origin/main"
+            fi
           fi
           HEAD_SHA="${{ github.sha }}"
 
@@ -83,6 +92,7 @@ jobs:
   build:
     needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: needs.test.outputs.services != ''
     permissions:
       contents: read
@@ -147,6 +157,7 @@ jobs:
     needs: [test, build]
     if: needs.test.outputs.services != ''
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     # No protection rules here — declaring the environment is what gives the job
     # access to this environment's secrets, so staging and prod use different
     # API tokens.
@@ -159,7 +170,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # checkout v4
 
       # floci pulls images through the host Docker daemon, so this VM needs its
-      # own registry credentials — the build job's login lives on another VM.
+      # own registry credentials, the build job's login lives on another VM.
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # login-action v3
         with:
@@ -201,8 +212,7 @@ jobs:
   # would push the others back to the older image the file still pinned.
   update-manifest:
     needs: [build, deploy-staging]
-    # Only after a merge to main, and only once staging deployed and passed its
-    # tests. A pull request never gets a bot commit.
+
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

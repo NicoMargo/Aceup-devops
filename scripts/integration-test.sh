@@ -4,18 +4,24 @@
 # be installed on the host and no dependency install step is required.
 set -euo pipefail
 
+# First argument: which environment to test. The script exits if it is missing.
 ENVIRONMENT="${1:?usage: integration-test.sh <staging|prod>}"
 
+# Absolute path to the repo root, so the script works from any folder.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Docker image used to run the tests.
 NODE_IMAGE="node:20-alpine"
+
+# File with the service URLs. deploy.sh writes it.
 ENV_FILE="${REPO_ROOT}/.deploy-${ENVIRONMENT}.env"
 
+# Fail early with a clear message if the environment was never deployed.
 [ -f "$ENV_FILE" ] || {
-  echo "missing ${ENV_FILE} — run scripts/deploy.sh ${ENVIRONMENT} first" >&2
+  echo "missing ${ENV_FILE}: run scripts/deploy.sh ${ENVIRONMENT} first" >&2
   exit 1
 }
 
-# shellcheck disable=SC1090
 set -a; source "$ENV_FILE"; set +a
 
 # The env file holds localhost URLs, which are right for a human running curl on
