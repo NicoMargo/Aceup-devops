@@ -253,3 +253,14 @@ Left out on purpose:
   `jq` was missing on Kali, so I dropped `jq` from the scripts and parse those
   two small JSON responses with `grep` instead. CI still uses `jq`, since the
   GitHub runners ship it and the parsing there is less trivial.
+
+## Cost
+
+floci is free, so there is no real bill here, but this is how I would think
+about it on GCP. Cloud Run charges per request and scales down to zero, so
+services with little traffic cost almost nothing while nobody is using them. The
+setting I would not skip is a maximum number of instances: without it, a bug
+that retries in a loop can start many containers and turn into a large bill. The
+other thing that grows without anyone looking is stored images, because every
+commit pushes new ones, so the old ones should be deleted. And since each
+environment is its own project, I would put a budget alert on each one.
