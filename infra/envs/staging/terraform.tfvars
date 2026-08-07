@@ -8,4 +8,4 @@ name_prefix = "staging-"
 
 inventory_image     = "ghcr.io/nicomargo/inventory@sha256:fd7014d34af2b02b468cf61be54d1ee551a477723aec88c80b3bf63a4ffdd861"
 notifications_image = "ghcr.io/nicomargo/notifications@sha256:d4e49ab459f990148e0ade7cbfcc0eab8d7713d5fd7466059ec94a6151b91d5f"
-orders_image        = "ghcr.io/nicomargo/orders@sha256:60dbfcced6a59007f14291161ff2df8d90a01c89bf8058c7980e2e094f3699a1"
+orders_image        = "ghcr.io/nicomargo/orders@sha256:23a6bde072cfbb6343fb70680cbc1ad9e32eb190d13cc59809f041929e4f1f15"
