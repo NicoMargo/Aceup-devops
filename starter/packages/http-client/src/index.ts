@@ -1,3 +1,10 @@
+// Note added by me, the code below is the original one.
+//
+// This is a comment to show the differential CI and that the deploy works.
+// Only orders depends on this package, so this change should rebuild and
+// deploy orders alone, and leave inventory and notifications on the digests
+// pinned in infra/envs/staging/terraform.tfvars.
+
 export class HttpError extends Error {
   constructor(
     message: string,
