@@ -1,4 +1,4 @@
-// Note added by me, the code below is the original one.
+// Note added by me. Everything below it is the original starter code.
 //
 // This is a comment to show the differential CI and that the deploy works.
 // Only orders depends on this package, so this change should rebuild and
