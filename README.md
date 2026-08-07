@@ -36,6 +36,11 @@ tests/integration/  tests that hit the deployed services over HTTP
           +-- seed secrets into Secret Manager
           +-- terraform apply -> Cloud Run
           +-- integration tests over HTTP
+          |
+   on main only:
+          |
+   [ update-manifest ]  opens a PR recording the deployed digests
+   [ deploy-prod ]      waits for a manual approval
 ```
 
 The three services talk to each other:
@@ -64,17 +69,24 @@ and it answers which packages and services are affected.
 The last row is on purpose. If the file that decides what to build has changed,
 we do not trust that decision.
 
-`infra/envs/<env>/terraform.tfvars` holds the image of each service. A pipeline
-run only overrides the services it rebuilt, so the file is always the record of
-what runs where. Rollback is a git revert of that file, and promotion to prod is
-copying the values across.
+`infra/envs/<env>/terraform.tfvars` pins each service's image by digest and is
+the record of what runs in that environment. A deploy overrides only the services
+it just rebuilt; everything else deploys what the file says, so rollback is a git
+revert plus a redeploy.
+
+After a merge to `main` deploys staging, the pipeline opens a pull request that
+writes the digests it deployed back into the staging tfvars — it never pushes to
+`main`. Promoting to prod is the same move by hand, with `scripts/promote.sh`.
+A change to a manifest rebuilds nothing, only redeploys.
 
 ## Running it locally
 
 This project was **developed** with **Ubuntu 24.04**
 
 You need **Docker** and **make**, and your user has to be able to talk to the
-Docker daemon (be in the `docker` group, or run the commands with `sudo`).
+Docker daemon (be in the `docker` group, or run every command with `sudo` — but
+pick one and stay with it, since mixing them leaves root-owned files behind that
+the next run cannot write).
 
 Node, Terraform and floci all run in containers with pinned versions, so none of
 them has to be installed. The scripts use only `curl`, `sed`, `grep` and
