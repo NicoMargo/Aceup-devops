@@ -253,10 +253,16 @@ jobs:
           git commit -m "Record deployed staging digests"
           git push --force origin chore/staging-manifest
 
-          gh pr view chore/staging-manifest >/dev/null 2>&1 || \
+          # Only an open pull request skips the create, a merged one must not.
+          OPEN=$(gh pr list --head chore/staging-manifest --state open --json number --jq '.[].number')
+
+          if [ -n "$OPEN" ]; then
+            echo "pull request #$OPEN is already open, it now has the new digests"
+          else
             gh pr create --base main --head chore/staging-manifest \
               --title "Record deployed staging digests" \
               --body "Staging now runs these digests. Merging keeps the manifest in step with what is deployed, so services this pipeline does not rebuild are pinned to their current image rather than an older one."
+          fi
 
   deploy-prod:
     needs: [test, build, deploy-staging]
