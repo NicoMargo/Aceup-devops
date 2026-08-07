@@ -17,7 +17,11 @@ Decisions I made, why, and what I left out.
    phases. Services this run rebuilt get the new digest; the rest get what
    `infra/envs/staging/terraform.tfvars` pins. Then it runs the integration tests
    against the deployed services and checks they fail closed without a secret.
-5. **If anything above fails, the pull request cannot be merged.**
+5. **If anything above fails, the pull request cannot be merged.** The branch
+   rule requires one check, `ci-ok`, which passes only if every job above passed
+   or was skipped. It has to be that job and not the three themselves: `build`
+   and `deploy-staging` are skipped when nothing is affected, and a skipped
+   required check leaves a pull request pending for ever.
 6. **You merge to `main`.** The same three jobs run again. Two more follow:
    `update-manifest` opens a pull request writing the digests it deployed into the
    staging tfvars, and `deploy-prod` waits until someone approves the `production`
@@ -74,6 +78,13 @@ is behind until that pull request is merged.
 A manifest change rebuilds nothing: `affected-packages.js` ignores `infra/envs/`.
 Without that, merging the bot's pull request would rebuild every service, get new
 digests, and open another one.
+
+That has a consequence I had to handle. With nothing affected, `build` and
+`deploy-staging` are skipped, and a job whose `needs` were skipped is skipped
+too — so a promotion, which only edits the prod manifest, would never have
+reached prod. `deploy-prod` therefore uses `!cancelled()` plus explicit checks on
+each `needs.*.result`, which lets a skipped job through but still stops on a
+failed one.
 
 Promotion is a commit, not a pipeline trigger. `scripts/promote.sh` copies the
 image values from the staging tfvars into the prod one; that change goes through

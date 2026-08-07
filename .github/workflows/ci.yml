@@ -206,6 +206,29 @@ jobs:
         if: failure()
         run: docker logs floci-gcp
 
+  # The single check the branch rule requires. build and deploy-staging are
+  # skipped when nothing is affected, and a skipped required check leaves a pull
+  # request pending for ever, so the rule points here instead of at them.
+  ci-ok:
+    needs: [test, build, deploy-staging]
+    if: '!cancelled()'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail unless every job passed or was skipped
+        run: |
+          echo "test:           ${{ needs.test.result }}"
+          echo "build:          ${{ needs.build.result }}"
+          echo "deploy-staging: ${{ needs['deploy-staging'].result }}"
+
+          for result in "${{ needs.test.result }}" \
+                        "${{ needs.build.result }}" \
+                        "${{ needs['deploy-staging'].result }}"; do
+            case "$result" in
+              success | skipped) ;;
+              *) echo "a job did not pass" >&2; exit 1 ;;
+            esac
+          done
+
   # Without this the tfvars would only hold the images of services that were not
   # rebuilt, so it would drift further from reality on every deploy. On a
   # persistent environment that is a real bug: a deploy that changed one service
@@ -266,8 +289,16 @@ jobs:
 
   deploy-prod:
     needs: [test, build, deploy-staging]
-    # Only on main, and only once staging deployed and passed its tests.
-    if: github.ref == 'refs/heads/main'
+    # A promotion only edits the prod manifest, so nothing is affected and both
+    # build and deploy-staging are skipped. Without !cancelled() a skipped need
+    # would skip this job too, and the promotion would never reach prod. The
+    # result checks keep the gate: a job that failed still stops it.
+    if: >-
+      !cancelled()
+      && github.ref == 'refs/heads/main'
+      && needs.test.result == 'success'
+      && (needs.build.result == 'success' || needs.build.result == 'skipped')
+      && (needs['deploy-staging'].result == 'success' || needs['deploy-staging'].result == 'skipped')
     runs-on: ubuntu-latest
     # GitHub holds this job until a reviewer approves it.
     environment: production
