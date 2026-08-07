@@ -85,7 +85,13 @@ function main() {
   for (const file of changedFiles) {
     // git runs at the repo root, one level above starter/.
     if (!file.startsWith("starter/")) {
-      // CI config, infra, docs. We cannot tell what they affect, so rebuild all.
+      // Environment manifests only say which image to deploy, they never change
+      // what is inside one, so they must not trigger a rebuild. Without this the
+      // manifest pull request rebuilds everything, gets new digests, and opens
+      // another manifest pull request.
+      if (file.startsWith("infra/envs/")) continue;
+
+      // CI config, modules, docs. We cannot tell what they affect, so rebuild all.
       rootChange = true;
       continue;
     }
