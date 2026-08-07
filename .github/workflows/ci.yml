@@ -195,6 +195,59 @@ jobs:
         if: failure()
         run: docker logs floci-gcp
 
+  # Without this the tfvars would only hold the images of services that were not
+  # rebuilt, so it would drift further from reality on every deploy. On a
+  # persistent environment that is a real bug: a deploy that changed one service
+  # would push the others back to the older image the file still pinned.
+  update-manifest:
+    needs: [build, deploy-staging]
+    # Only after a merge to main, and only once staging deployed and passed its
+    # tests. A pull request never gets a bot commit.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # to push the bot branch — never main, which stays protected
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # checkout v4
+        with:
+          ref: main
+
+      - name: Record the digests that were deployed
+        env:
+          IMAGES_JSON: ${{ needs.build.outputs.images }}
+        run: |
+          export INVENTORY_IMAGE=$(echo "$IMAGES_JSON" | jq -r '.inventory // empty')
+          export NOTIFICATIONS_IMAGE=$(echo "$IMAGES_JSON" | jq -r '.notifications // empty')
+          export ORDERS_IMAGE=$(echo "$IMAGES_JSON" | jq -r '.orders // empty')
+          ./scripts/set-images.sh staging
+
+      # A manifest change reaches main the same way any other change does: through
+      # a pull request. Always the same branch, so repeated deploys update one
+      # pull request instead of opening a new one each time.
+      - name: Open or update the manifest pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet infra/envs/staging/terraform.tfvars; then
+            echo "manifest already matches what is deployed"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git checkout -B chore/staging-manifest
+          git add infra/envs/staging/terraform.tfvars
+          git commit -m "Record deployed staging digests"
+          git push --force origin chore/staging-manifest
+
+          gh pr view chore/staging-manifest >/dev/null 2>&1 || \
+            gh pr create --base main --head chore/staging-manifest \
+              --title "Record deployed staging digests" \
+              --body "Staging now runs these digests. Merging keeps the manifest in step with what is deployed, so services this pipeline does not rebuild are pinned to their current image rather than an older one."
+
   deploy-prod:
     needs: [test, build, deploy-staging]
     # Only on main, and only once staging deployed and passed its tests.

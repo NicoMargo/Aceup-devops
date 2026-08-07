@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Promotes the images currently deployed to staging into the prod manifest.
+# Promotes the images currently pinned for staging into the prod manifest.
 #
 # This does not deploy anything. It edits infra/envs/prod/terraform.tfvars so the
 # change goes through a pull request, which is what makes promotion auditable:
@@ -8,22 +8,27 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FROM="${REPO_ROOT}/infra/envs/staging/terraform.tfvars"
-TO="${REPO_ROOT}/infra/envs/prod/terraform.tfvars"
+STAGING="${REPO_ROOT}/infra/envs/staging/terraform.tfvars"
+
+read_image() {
+  sed -n "s/^[[:space:]]*$1_image[[:space:]]*=[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$STAGING"
+}
+
+inventory=$(read_image inventory)
+notifications=$(read_image notifications)
+orders=$(read_image orders)
+
+for service in inventory notifications orders; do
+  [ -n "${!service}" ] || { echo "could not read ${service}_image from staging" >&2; exit 1; }
+done
 
 echo "promoting staging images into prod:"
 
-for service in inventory notifications orders; do
-  image=$(sed -n "s/^[[:space:]]*${service}_image[[:space:]]*=[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$FROM")
-  [ -n "$image" ] || { echo "could not read ${service}_image from staging" >&2; exit 1; }
-
-  # Write through a temp file instead of `sed -i`: GNU and BSD sed disagree on
-  # whether -i takes a backup suffix, and macOS ships the BSD one.
-  sed "s|^\([[:space:]]*${service}_image[[:space:]]*=[[:space:]]*\).*|\1\"${image}\"|" "$TO" > "${TO}.tmp"
-  mv "${TO}.tmp" "$TO"
-  echo "  ${service} -> ${image}"
-done
+INVENTORY_IMAGE="$inventory" \
+NOTIFICATIONS_IMAGE="$notifications" \
+ORDERS_IMAGE="$orders" \
+  "${REPO_ROOT}/scripts/set-images.sh" prod
 
 echo
 echo "prod manifest updated. Commit it and open a pull request to promote."
-git --no-pager diff --stat "$TO"
+git --no-pager diff --stat "${REPO_ROOT}/infra/envs/prod/terraform.tfvars"
