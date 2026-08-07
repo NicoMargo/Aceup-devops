@@ -18,9 +18,10 @@ Decisions I made, why, and what I left out.
    `infra/envs/staging/terraform.tfvars` pins. Then it runs the integration tests
    against the deployed services and checks they fail closed without a secret.
 5. **If anything above fails, the pull request cannot be merged.**
-6. **You merge to `main`.** The same three jobs run again, and then `deploy-prod`
-   appears and waits, GitHub holds it until someone approves the `production`
-   environment. It deploys exactly what the prod tfvars pins.
+6. **You merge to `main`.** The same three jobs run again. Two more follow:
+   `update-manifest` opens a pull request writing the digests it deployed into the
+   staging tfvars, and `deploy-prod` waits until someone approves the `production`
+   environment, then deploys exactly what the prod tfvars pins.
 7. **Promoting is a separate change.** `scripts/promote.sh` copies the staging
    digests into the prod tfvars, and that edit goes through its own pull request.
 
@@ -58,10 +59,21 @@ variable declarations and a module call. All the difference is in
 boilerplate, but workspaces share one state backend and I prefer a separate state
 file per environment.
 
-`terraform.tfvars` is the manifest of what is deployed. A pipeline run overrides
-the image only for the services it rebuilt; the rest stay on what the file pins.
-So the repo always says which version runs where, rollback is a git revert plus a
-redeploy, and promotion is copying image values from one tfvars to the other.
+`terraform.tfvars` pins each service's image by digest and is the record of what
+runs in that environment. A deploy overrides only the services it just rebuilt;
+everything else deploys what the file says. So rollback is a git revert plus a
+redeploy.
+
+Keeping that record true needs the pipeline to write back. After a merge to
+`main` deploys staging, `update-manifest` puts the digests it deployed into the
+staging tfvars — through a pull request, not a push to `main`. A direct push would
+have needed either a bypass on the branch protection or a long-lived credential,
+and this project's argument is that it uses neither. The cost is that the manifest
+is behind until that pull request is merged.
+
+A manifest change rebuilds nothing: `affected-packages.js` ignores `infra/envs/`.
+Without that, merging the bot's pull request would rebuild every service, get new
+digests, and open another one.
 
 Promotion is a commit, not a pipeline trigger. `scripts/promote.sh` copies the
 image values from the staging tfvars into the prod one; that change goes through
