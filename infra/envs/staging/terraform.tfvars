@@ -6,6 +6,6 @@ name_prefix = "staging-"
 # pinned here. Rollback is therefore a git revert, and promotion to prod is a
 # copy of these values into the prod tfvars.
 
-inventory_image     = "ghcr.io/nicomargo/inventory@sha256:6231f27e26e8da16dc1bc18a3625c671401e4b64e5c2a4593ff98e9b37ab9ae8"
-notifications_image = "ghcr.io/nicomargo/notifications@sha256:44f131ce0f28e8e1098c24348cc06439c5cb1f77863c56110c72cee3e0fdc32a"
-orders_image        = "ghcr.io/nicomargo/orders@sha256:7ecfd2ea3fea76cff7021bf973cdb612581e0d1e51da4888aa2eea15b3fe5328"
+inventory_image     = "ghcr.io/nicomargo/inventory@sha256:ed8c75912e916c5fa8f66f445491161723a60d5ace40d85b9852061f354105c0"
+notifications_image = "ghcr.io/nicomargo/notifications@sha256:eadceefea3015196e92f94976f6f99406b4a26b5edf74c6a3ca107fc2e0b6eb5"
+orders_image        = "ghcr.io/nicomargo/orders@sha256:dff908c4f47654b7a1210c781c6d8444504f64b4c9fbb9045db9ec2260b2daa1"
