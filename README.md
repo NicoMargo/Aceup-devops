@@ -168,7 +168,9 @@ revert plus a redeploy.
 After a merge to `main` deploys staging, the pipeline opens a pull request that
 writes the digests it deployed back into the staging tfvars — it never pushes to
 `main`. Promoting to prod is the same move by hand, with `scripts/promote.sh`.
-A change to a manifest rebuilds nothing, only redeploys.
+A change to a manifest rebuilds nothing. Merging one redeploys prod, which
+always deploys what its own manifest pins; staging is redeployed by the next
+pipeline run, or by hand with `make deploy ENV=staging`.
 
 ## Opening up `make verify`
 
