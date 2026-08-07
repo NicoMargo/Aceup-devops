@@ -24,13 +24,17 @@ help:
 	@echo "make test-secrets            check services fail closed"
 	@echo "make verify ENV=staging      floci-up + deploy + both test suites"
 
-install:
+install: starter/node_modules
+
+# A file target, so the install only runs when the directory is not there. On a
+# fresh clone `make test` would otherwise fail with "cannot find package tsx".
+starter/node_modules:
 	$(NPM) ci
 
-test:
+test: starter/node_modules
 	$(NPM) test
 
-build:
+build: starter/node_modules
 	$(NPM) run build
 
 # The Docker socket is mounted because floci starts Cloud Run containers through

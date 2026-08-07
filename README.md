@@ -84,7 +84,9 @@ A change to a manifest rebuilds nothing, only redeploys.
 This project was **developed** with **Ubuntu 24.04**
 
 You need **Docker** and **make**, and your user has to be able to talk to the
-Docker daemon (be in the `docker` group, or run the commands with `sudo`).
+Docker daemon (be in the `docker` group, or run every command with `sudo` — but
+pick one and stay with it, since mixing them leaves root-owned files behind that
+the next run cannot write).
 
 Node, Terraform and floci all run in containers with pinned versions, so none of
 them has to be installed. The scripts use only `curl`, `sed`, `grep` and
