@@ -37,7 +37,7 @@ async function main(): Promise<void> {
   app.get("/orders/:id", (req, res) => {
     const order = orders.get(req.params.id);
     if (!order) {
-      res.status(404).json({ error: "not_found" });
+      res.status(404).json({ error: "not found" });
       return;
     }
     res.json(order);
